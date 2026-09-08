@@ -1,0 +1,59 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [wallet, user]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache-dependency-path: services/${{ matrix.service }}/go.sum
+
+      - name: vet
+        working-directory: services/${{ matrix.service }}
+        run: go vet ./...
+
+      - name: tests (race + coverage)
+        working-directory: services/${{ matrix.service }}
+        run: go test -race -coverprofile=coverage.out ./...
+
+      - name: coverage gate (core services >= 80%)
+        working-directory: services/${{ matrix.service }}
+        run: |
+          total=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | tr -d '%')
+          echo "total=$total%"
+          if [ "${{ matrix.service }}" = "wallet" ] && [ "$total" -lt 80 ]; then
+            echo "::error::wallet coverage below 80%"; exit 1
+          fi
+
+  openapi-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: validate openapi-spec.json
+        run: npx --yes @apidevtools/swagger-cli validate openapi-spec.json
+
+  trivy-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+          ignore-unfixed: "true"

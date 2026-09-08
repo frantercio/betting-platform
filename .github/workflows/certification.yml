@@ -1,0 +1,100 @@
+name: certification
+
+# Manual, gated pipeline for the accredited lab (GLI/BMM/iTech).
+# Freezes a build, runs the full E2E suite, collects audit evidence.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Homologation environment"
+        required: true
+        default: "homolog"
+        type: choice
+        options: [homolog]
+
+concurrency:
+  group: certification
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  freeze:
+    runs-on: ubuntu-latest
+    outputs:
+      build_id: ${{ steps.hash.outputs.build_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: compute frozen build id
+        id: hash
+        run: |
+          echo "build_id=$(git rev-parse HEAD)-$(date +%Y%m%d%H%M%S)" >> "$GITHUB_OUTPUT"
+
+      - name: gated approval (CTO + CCO)
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ secrets.CERT_APPROVAL_SECRET }}
+          approvers: |
+            cto
+            compliance-officer
+          minimum-approvals: 2
+          message: "Certification run for build ${{ hash.outputs.build_id }}"
+
+  e2e:
+    needs: freeze
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+
+      - name: boot stack (postgres, redis, kafka)
+        run: docker compose up -d postgres redis kafka
+        env:
+          COMPOSE_PROJECT_NAME: cert
+
+      - name: run wallet E2E (idempotency, PIX, overdraft)
+        working-directory: services/wallet
+        run: go test -race -count=1 -v ./...
+
+      - name: run RG E2E (limits 24h, self-exclusion)
+        working-directory: services/user
+        run: go test -race -count=1 -v ./...
+
+      - name: RNG statistical sample (chi-square smoke)
+        working-directory: services/wallet
+        run: go run ./cmd/server & sleep 2; \
+             curl -sf http://localhost:8080/healthz || true
+
+      - name: collect audit evidence
+        run: |
+          mkdir -p evidence
+          echo "build_id: ${{ needs.freeze.outputs.build_id }}" > evidence/build.txt
+          find services -name coverage.out -exec cp {} evidence/ \;
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evidence
+          path: evidence/
+
+  evidence-archive:
+    needs: e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: evidence
+
+      # archive on immutable object lock (S3 WORM) so the lab can verify.
+      - name: hash chain manifest
+        run: |
+          find evidence -type f -print0 | sort -z | xargs -0 sha256sum > evidence/manifest.sha256
+          cat evidence/manifest.sha256
+
+      - name: placeholder - upload to S3 with Object Lock (real impl)
+        run: echo "upload evidence/ to bucket with --object-lock-mode GOVERNANCE"

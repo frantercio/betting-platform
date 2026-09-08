@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Admin - Betting Platform</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+body{font-family:system-ui, sans-serif;margin:0;padding:0;background:#0f172a;color:#e2e8f0}
+header{background:#1e293b;padding:1rem 2rem;display:flex;gap:2rem}
+header a{color:#e2e8f0;text-decoration:none}
+main{padding:2rem}
+table{width:100%;border-collapse:collapse}
+th,td{padding:.6rem;border-bottom:1px solid #334155;text-align:left}
+button{background:#3b82f6;color:white;border:none;padding:.5rem 1rem;border-radius:.5rem;cursor:pointer}
+#login{max-width:320px;margin:100px auto;padding:2rem;background:#1e293b;border-radius:1rem}
+input{width:100%;padding:.6rem;margin:.5rem 0;border-radius:.5rem;border:1px solid #334155;background:#0f172a;color:#e2e8f0}
+</style>
+</head>
+<body>
+<div id="login">
+<h2>Login Admin</h2>
+<input id="user" placeholder="username">
+<input id="pass" type="password" placeholder="password">
+<button onclick="doLogin()">Entrar</button>
+</div>
+<div id="app" style="display:none">
+<header>
+<a href="#" onclick="loadUsers()">Usuários</a>
+<a href="#" onclick="loadAudit()">Auditoria</a>
+<a href="#" onclick="downloadCSV()">Export CSV</a>
+<a href="#" onclick="doLogout()" style="float:right">Sair</a>
+</header>
+<main>
+<h1>Admin Dashboard</h1>
+<div id="metrics" style="display:flex;gap:1rem;margin-bottom:1rem">
+<div style="background:#1e293b;padding:1rem;border-radius:.5rem">Usuários: <span id="mUsers">-</span></div>
+<div style="background:#1e293b;padding:1rem;border-radius:.5rem">Apostas: <span id="mBets">-</span></div>
+<div style="background:#1e293b;padding:1rem;border-radius:.5rem">Saldo Total: <span id="mBal">-</span></div>
+</div>
+<canvas id="chart" height="120"></canvas>
+<div id="auditView" style="display:none">
+<h2>Auditoria</h2>
+<pre id="auditLog"></pre>
+</div>
+<h2>Usuários</h2>
+<table id="users"><thead><tr><th>ID</th><th>Status</th><th>KYC</th><th>Ações</th></tr></thead><tbody></tbody></table>
+</main>
+</div>
+<script>
+let token='';
+async function doLogin(){
+  const res = await fetch('/admin/login', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({username:document.getElementById('user').value, password:document.getElementById('pass').value})
+  });
+  const data = await res.json();
+  if(data.token){ token=data.token; document.getElementById('login').style.display='none'; document.getElementById('app').style.display='block'; loadMetrics(); loadUsers(); }
+}
+async function api(path, opts={}){
+  return fetch(path,{headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},...opts});
+}
+async function loadMetrics(){
+  const res = await api('/admin/metrics');
+  const data = await res.json();
+  const m = data.metrics||{};
+  document.getElementById('mUsers').textContent = m.users ?? '-';
+  document.getElementById('mBets').textContent = m.bets ?? '-';
+  document.getElementById('mBal').textContent = (m.total_balance_cents||0)/100;
+  const series = (data.series||[]).reverse();
+  const labels = series.map(s=>s.date);
+  const values = series.map(s=>s.users);
+  const ctx = document.getElementById('chart');
+  if(ctx && !window.chart){
+    window.chart = new Chart(ctx,{
+      type:'line',
+      data:{labels, datasets:[{label:'Usuários por dia',data:values,borderColor:'#3b82f6',tension:0.3}]},
+      options:{plugins:{legend:{labels:{color:'#e2e8f0'}}},scales:{x:{ticks:{color:'#e2e8f0'}},y:{ticks:{color:'#e2e8f0'}}}}
+    });
+  } else if(window.chart){
+    window.chart.data.labels = labels;
+    window.chart.data.datasets[0].data = values;
+    window.chart.update();
+  }
+}
+async function loadUsers(){
+  const res = await api('/admin/users');
+  const data = await res.json();
+  const tbody = document.querySelector('#users tbody');
+  tbody.innerHTML='';
+  (data.users||[]).forEach(u=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${u.id}</td><td>${u.status}</td><td>${u.kyc}</td><td><button onclick="block('${u.id}')">Block</button></td>`;
+    tbody.appendChild(tr);
+  });
+}
+async function block(id){
+  await fetch('/admin/users/block?id='+id,{method:'POST',headers:{'Authorization':'Bearer '+token}});
+  loadUsers();
+}
+async function loadAudit(){
+  const res = await api('/admin/audit');
+  const data = await res.json();
+  document.getElementById('auditLog').textContent = JSON.stringify(data.audit, null, 2);
+  document.getElementById('auditView').style.display='block';
+}
+function downloadCSV(){ window.open('/admin/audit?format=csv'); }
+async function doLogout(){
+  await api('/admin/logout',{method:'POST'});
+  localStorage.removeItem('token');
+  document.getElementById('app').style.display='none';
+  document.getElementById('login').style.display='block';
+}
+</script>
+</body>
+</html>

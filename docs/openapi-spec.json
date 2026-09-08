@@ -1,0 +1,448 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Plataforma de Apostas - API Core",
+    "description": "API Gateways para Wallet, Bets, KYC, Reporting e Responsible Gaming. Base para a implementação e certificação junto ao SPA/MF.",
+    "version": "1.0.0",
+    "contact": { "name": "Tech", "email": "tech@platform.com.br" }
+  },
+  "servers": [
+    { "url": "https://api.platform.com.br/v1", "description": "Produção" },
+    { "url": "https://api-uat.platform.com.br/v1", "description": "Homologação (certificação)" }
+  ],
+  "tags": [
+    { "name": "Auth", "description": "Autenticação e sessão" },
+    { "name": "Wallet", "description": "Saldo, depósitos e saques (PIX)" },
+    { "name": "Bets", "description": "Apostas esportivas" },
+    { "name": "KYC", "description": "Cadastro e verificação de identidade" },
+    { "name": "ResponsibleGaming", "description": "Jogo responsável (limites, autoexclusão)" },
+    { "name": "Reporting", "description": "Relatórios SPA e financeiros" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      },
+      "apiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key"
+      }
+    },
+    "schemas": {
+
+      "Error": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": { "type": "string", "example": "INSUFFICIENT_FUNDS" },
+          "message": { "type": "string", "example": "Saldo insuficiente" },
+          "details": { "type": "array", "items": { "type": "object" } }
+        }
+      },
+
+      "AuthRequest": {
+        "type": "object",
+        "required": ["username", "password"],
+        "properties": {
+          "username": { "type": "string", "description": "CPF ou e-mail" },
+          "password": { "type": "string", "format": "password" },
+          "mfa_code": { "type": "string", "description": "Código TOTP (opcional se MFA habilitado)" }
+        }
+      },
+      "AuthResponse": {
+        "type": "object",
+        "required": ["access_token", "refresh_token", "expires_in"],
+        "properties": {
+          "access_token": { "type": "string" },
+          "refresh_token": { "type": "string" },
+          "expires_in": { "type": "integer", "example": 900 },
+          "mfa_required": { "type": "boolean", "example": false }
+        }
+      },
+
+      "TransactionRequest": {
+        "type": "object",
+        "required": ["amount", "currency", "request_id"],
+        "properties": {
+          "amount": { "type": "number", "format": "double", "minimum": 0.01, "example": 100.00 },
+          "currency": { "type": "string", "enum": ["BRL"], "example": "BRL" },
+          "request_id": { "type": "string", "description": "Idempotência única (UUID)", "format": "uuid" },
+          "pix_key": { "type": "string", "description": "Chave PIX destino", "example": "cpf@example.com" }
+        }
+      },
+      "DepositResponse": {
+        "type": "object",
+        "required": ["transaction_id", "status", "qr_code", "copia_e_cola", "expires_at"],
+        "properties": {
+          "transaction_id": { "type": "string", "format": "uuid" },
+          "status": { "type": "string", "enum": ["PENDING", "COMPLETED", "FAILED"] },
+          "qr_code": { "type": "string", "description": "Imagem QR base64 ou URL" },
+          "copia_e_cola": { "type": "string", "example": "00020126580014BR..." },
+          "expires_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "WithdrawalResponse": {
+        "type": "object",
+        "required": ["transaction_id", "status"],
+        "properties": {
+          "transaction_id": { "type": "string", "format": "uuid" },
+          "status": { "type": "string", "enum": ["PENDING", "COMPLETED", "FAILED", "CANCELLED"] },
+          "fraud_check": { "type": "object", "properties": { "status": { "type": "string", "enum": ["APPROVED", "REVIEW", "REJECTED"] } } }
+        }
+      },
+      "BalanceResponse": {
+        "type": "object",
+        "required": ["available", "bonus", "currency"],
+        "properties": {
+          "available": { "type": "number", "format": "double", "example": 2500.50 },
+          "bonus": { "type": "number", "format": "double", "example": 50.00 },
+          "currency": { "type": "string", "example": "BRL" }
+        }
+      },
+
+      "BetRequest": {
+        "type": "object",
+        "required": ["event_id", "market", "selection", "odds", "stake"],
+        "properties": {
+          "event_id": { "type": "string", "example": "SP-123456" },
+          "market": { "type": "string", "example": "FULL_TIME_RESULT" },
+          "selection": { "type": "string", "example": "HOME_WIN" },
+          "odds": { "type": "number", "format": "double", "minimum": 1.01, "example": 1.85 },
+          "stake": { "type": "number", "format": "double", "minimum": 0.50, "example": 100.00 },
+          "bet_type": { "type": "string", "enum": ["SINGLE", "COMBO"], "default": "SINGLE" },
+          "legs": {
+            "type": "array",
+            "items": { "type": "object", "properties": { "event_id": { "type": "string" }, "market": { "type": "string" }, "selection": { "type": "string" }, "odds": { "type": "number" } } },
+            "description": "Se bet_type = COMBO"
+          }
+        }
+      },
+      "BetResponse": {
+        "type": "object",
+        "required": ["bet_id", "status", "odds_accepted"],
+        "properties": {
+          "bet_id": { "type": "string", "format": "uuid" },
+          "status": { "type": "string", "enum": ["ACCEPTED", "REJECTED", "PENDING"] },
+          "odds_accepted": { "type": "number", "format": "double" },
+          "potential_win": { "type": "number", "format": "double" },
+          "reject_reason": { "type": "string", "enum": ["ODDS_CHANGED", "STAKE_EXCEEDS_LIMIT", "EVENT_SUSPENDED", "ACCOUNT_BLOCKED"] }
+        }
+      },
+      "BetStatus": {
+        "type": "object",
+        "properties": {
+          "bet_id": { "type": "string", "format": "uuid" },
+          "status": { "type": "string", "enum": ["ACCEPTED", "SETTLED_WIN", "SETTLED_LOSS", "CASHED_OUT", "CANCELLED"] },
+          "payout": { "type": "number", "format": "double" }
+        }
+      },
+
+      "KycSubmitRequest": {
+        "type": "object",
+        "required": ["document_type", "document_number"],
+        "properties": {
+          "document_type": { "type": "string", "enum": ["CPF"] },
+          "document_number": { "type": "string", "example": "123.456.789-09" },
+          "full_name": { "type": "string" },
+          "birth_date": { "type": "string", "format": "date" },
+          "selfie": { "type": "string", "format": "binary", "description": "Selfie com liveness" },
+          "document_front": { "type": "string", "format": "binary" },
+          "document_back": { "type": "string", "format": "binary" },
+          "address": { "type": "object", "properties": { "street": { "type": "string" }, "city": { "type": "string" }, "state": { "type": "string" }, "zip": { "type": "string" } } }
+        }
+      },
+      "KycStatus": {
+        "type": "object",
+        "required": ["kyc_level", "status"],
+        "properties": {
+          "kyc_level": { "type": "integer", "example": 2 },
+          "status": { "type": "string", "enum": ["NOT_SUBMITTED", "PENDING", "APPROVED", "REJECTED", "EXPIRED"] },
+          "rejection_reason": { "type": "string" }
+        }
+      },
+
+      "RGSetLimit": {
+        "type": "object",
+        "required": ["limit_type", "period", "amount"],
+        "properties": {
+          "limit_type": { "type": "string", "enum": ["DEPOSIT", "LOSS", "SESSION_TIME"] },
+          "period": { "type": "string", "enum": ["DAILY", "WEEKLY", "MONTHLY"] },
+          "amount": { "type": "number", "format": "double", "description": "Para DEPOSIT/LOSS. Sessão usa duration" },
+          "duration_minutes": { "type": "integer", "description": "Para SESSION_TIME" }
+        }
+      },
+      "RGSetLimitResponse": {
+        "type": "object",
+        "required": ["effective_from", "current_limits"],
+        "properties": {
+          "effective_from": { "type": "string", "format": "date-time", "description": "Mínimo 24h para redução" },
+          "current_limits": { "type": "array", "items": { "type": "object" } }
+        }
+      },
+      "SelfExclusion": {
+        "type": "object",
+        "required": ["duration"],
+        "properties": {
+          "duration": { "type": "string", "enum": ["24H", "7D", "30D", "90D", "6M", "PERMANENT"] }
+        }
+      },
+
+      "ReportRow": {
+        "type": "object",
+        "properties": {
+          "date": { "type": "string", "format": "date" },
+          "bets_placed": { "type": "integer" },
+          "bets_settled": { "type": "integer" },
+          "turnover": { "type": "number", "format": "double" },
+          "ggr": { "type": "number", "format": "double" },
+          "payout_percent": { "type": "number", "format": "double" },
+          "active_users": { "type": "integer" },
+          "deposits": { "type": "number", "format": "double" },
+          "withdrawals": { "type": "number", "format": "double" },
+          "new_users": { "type": "integer" }
+        }
+      }
+
+    }
+  },
+
+  "paths": {
+
+    "/auth/login": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Login de usuário",
+        "operationId": "login",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AuthRequest" } } } },
+        "responses": {
+          "200": { "description": "Sucesso", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AuthResponse" } } } },
+          "401": { "description": "Credenciais inválidas ou MFA requerido", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Refrescar token",
+        "operationId": "refresh",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["refresh_token"], "properties": { "refresh_token": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "Novo access token", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AuthResponse" } } } } }
+      }
+    },
+
+    "/wallet/balance": {
+      "get": {
+        "tags": ["Wallet"],
+        "summary": "Saldo do usuário",
+        "operationId": "getBalance",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Saldo disponível", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BalanceResponse" } } } }
+        }
+      }
+    },
+
+    "/wallet/deposits": {
+      "post": {
+        "tags": ["Wallet"],
+        "summary": "Iniciar depósito via PIX",
+        "operationId": "createDeposit",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TransactionRequest" } } } },
+        "responses": {
+          "201": { "description": "QR Code gerado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DepositResponse" } } } },
+          "429": { "description": "Limite de depósito (RG) atingido", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+
+    "/wallet/withdrawals": {
+      "post": {
+        "tags": ["Wallet"],
+        "summary": "Solicitar saque via PIX",
+        "operationId": "createWithdrawal",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TransactionRequest" } } } },
+        "responses": {
+          "201": { "description": "Saque aceito (sujeito a fraude check)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WithdrawalResponse" } } } }
+        }
+      }
+    },
+
+    "/wallet/transactions": {
+      "get": {
+        "tags": ["Wallet"],
+        "summary": "Histórico de transações",
+        "operationId": "getTransactions",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "from", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "to", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "type", "in": "query", "schema": { "type": "string", "enum": ["DEPOSIT", "WITHDRAW", "BET", "BONUS"] } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50, "maximum": 200 } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer", "default": 0 } }
+        ],
+        "responses": {
+          "200": { "description": "Lista de transações", "content": { "application/json": { "schema": { "type": "object", "properties": { "items": { "type": "array", "items": { "type": "object" } }, "total": { "type": "integer" } } } } } }
+        }
+      }
+    },
+
+    "/wallet/webhooks/pix": {
+      "post": {
+        "tags": ["Wallet"],
+        "summary": "Webhook de confirmação PIX do PSP",
+        "operationId": "pixWebhook",
+        "security": [{ "apiKey": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["event", "payload", "signature"], "properties": {
+          "event": { "type": "string", "example": "pix.payment.confirmed" },
+          "payload": { "type": "object" },
+          "signature": { "type": "string", "description": "Assinatura HMAC do PSP" }
+        } } } } },
+        "responses": { "200": { "description": "Recebido" } }
+      }
+    },
+
+    "/bets": {
+      "post": {
+        "tags": ["Bets"],
+        "summary": "Criar aposta",
+        "operationId": "placeBet",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BetRequest" } } } },
+        "responses": {
+          "201": { "description": "Aposta aceita/rejeitada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BetResponse" } } } }
+        }
+      },
+      "get": {
+        "tags": ["Bets"],
+        "summary": "Listar apostas do usuário",
+        "operationId": "listBets",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["OPEN", "SETTLED", "CASHED_OUT"] } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50 } }
+        ],
+        "responses": { "200": { "description": "Lista de apostas", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/BetStatus" } } } } } }
+      }
+    },
+    "/bets/{betId}": {
+      "get": {
+        "tags": ["Bets"],
+        "summary": "Status de uma aposta",
+        "operationId": "getBet",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "betId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": { "200": { "description": "Detalhe", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BetStatus" } } } } }
+      }
+    },
+    "/bets/{betId}/cashout": {
+      "post": {
+        "tags": ["Bets"],
+        "summary": "Cashout de aposta aberta",
+        "operationId": "cashout",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "betId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": { "200": { "description": "Cashout executado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BetStatus" } } } } }
+      }
+    },
+
+    "/kyc/status": {
+      "get": {
+        "tags": ["KYC"],
+        "summary": "Status de verificação",
+        "operationId": "getKycStatus",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "Nível e status", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KycStatus" } } } } }
+      }
+    },
+    "/kyc/submit": {
+      "post": {
+        "tags": ["KYC"],
+        "summary": "Submeter documentos (multipart)",
+        "operationId": "submitKyc",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "multipart/form-data": { "schema": { "$ref": "#/components/schemas/KycSubmitRequest" } } } },
+        "responses": {
+          "202": { "description": "Documentos recebidos, análise em andamento", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KycStatus" } } } }
+        }
+      }
+    },
+
+    "/rg/limits": {
+      "get": {
+        "tags": ["ResponsibleGaming"],
+        "summary": "Listar limites atuais",
+        "operationId": "getRgLimits",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "Limites configurados", "content": { "application/json": { "schema": { "type": "array", "items": { "type": "object" } } } } } }
+      },
+      "put": {
+        "tags": ["ResponsibleGaming"],
+        "summary": "Definir/alterar limite",
+        "operationId": "setRgLimit",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RGSetLimit" } } } },
+        "responses": { "200": { "description": "Limite efetivado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RGSetLimitResponse" } } } } }
+      }
+    },
+    "/rg/self-exclusion": {
+      "post": {
+        "tags": ["ResponsibleGaming"],
+        "summary": "Autoexclusão",
+        "operationId": "selfExclude",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SelfExclusion" } } } },
+        "responses": { "200": { "description": "Bloqueio aplicado", "content": { "application/json": { "schema": { "type": "object", "properties": { "status": { "type": "string", "example": "EXCLUDED" }, "until": { "type": "string", "format": "date-time" } } } } } } }
+      }
+    },
+    "/rg/reality-check": {
+      "post": {
+        "tags": ["ResponsibleGaming"],
+        "summary": "Confirmar realidade check (60 min)",
+        "operationId": "realityCheck",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "Sessão atualizada", "content": { "application/json": { "schema": { "type": "object", "properties": { "acknowledged": { "type": "boolean" }, "session_seconds": { "type": "integer" }, "net_result": { "type": "number" } } } } } } }
+      }
+    },
+
+    "/reporting/daily": {
+      "get": {
+        "tags": ["Reporting"],
+        "summary": "Relatório diário agregado (SPA/Financeiro)",
+        "operationId": "getDailyReport",
+        "security": [{ "bearerAuth": [], "apiKey": [] }],
+        "parameters": [
+          { "name": "from", "in": "query", "required": true, "schema": { "type": "string", "format": "date" } },
+          { "name": "to", "in": "query", "required": true, "schema": { "type": "string", "format": "date" } }
+        ],
+        "responses": { "200": { "description": "Série diária", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/ReportRow" } } } } } }
+      }
+    },
+
+    "/reporting/audit-logs": {
+      "get": {
+        "tags": ["Reporting"],
+        "summary": "Consulta logs de auditoria imutáveis",
+        "operationId": "getAuditLogs",
+        "security": [{ "bearerAuth": [], "apiKey": [] }],
+        "parameters": [
+          { "name": "entity_type", "in": "query", "schema": { "type": "string", "enum": ["BET", "TRANSACTION", "USER", "RG", "ADMIN_ACTION"] } },
+          { "name": "entity_id", "in": "query", "schema": { "type": "string" } },
+          { "name": "from", "in": "query", "schema": { "type": "string", "format": "date-time" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 100 } }
+        ],
+        "responses": { "200": { "description": "Logs paginados", "content": { "application/json": { "schema": { "type": "array", "items": { "type": "object" } } } } } }
+      }
+    }
+
+  }
+}

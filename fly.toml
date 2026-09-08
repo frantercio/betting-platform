@@ -1,0 +1,15 @@
+app = "betting-admin"
+primary_region = "gru"
+
+[build]
+  dockerfile = "services/admin/Dockerfile"
+
+[env]
+  PORT = "8083"
+
+[[services]]
+  internal_port = 8083
+  protocol = "tcp"
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]

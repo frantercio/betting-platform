@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wallet
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: wallet
+  template:
+    metadata:
+      labels:
+        app: wallet
+    spec:
+      containers:
+      - name: wallet
+        image: registry.dev/wallet:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: jwt
+              key: secret
+# TODO: liveness/readiness probes, resources, affinity, hpa
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wallet
+spec:
+  selector:
+    app: wallet
+  ports:
+  - port: 80
+    targetPort: 8080

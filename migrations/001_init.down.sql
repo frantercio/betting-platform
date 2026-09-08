@@ -1,0 +1,7 @@
+DROP TABLE IF EXISTS rg_reality_checks;
+DROP TABLE IF EXISTS rg_exclusions;
+DROP TABLE IF EXISTS rg_limits;
+DROP TABLE IF EXISTS bets;
+DROP TABLE IF EXISTS ledger;
+DROP TABLE IF EXISTS wallet_accounts;
+DROP TABLE IF EXISTS users;

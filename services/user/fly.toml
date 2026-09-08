@@ -1,0 +1,12 @@
+app = "betting-user"
+primary_region = "gru"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8081"
+
+[[services]]
+  internal_port = 8081
+  protocol = "tcp"
