@@ -11,7 +11,14 @@ Esqueleto funcional de plataforma de apostas regulada (Lei 14.790/2023).
 
 ## 🚀 Deploy rápido
 
-### Fly.io gratuito
+### Railway.app gratuito
+```bash
+# Conecte GitHub no Railway.app
+# Adicione variáveis: JWT_SECRET, ADMIN_PASSWORD
+# Deploy automático
+```
+
+### Fly.io
 ```bash
 fly auth login
 ./deploy-fly.sh
